@@ -19,6 +19,7 @@ visualized/
 yolo_dataset/
 unimportant_logs/
 literature/
+models/
 
 # Logs
 *.log

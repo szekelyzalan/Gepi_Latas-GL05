@@ -77,7 +77,7 @@ Ha van NVIDIA GPU-d:
 ## ☁️ Adatok
 
 Az adatok Google Drive-on vannak tárolva.  
-👉 https://drive.google.com/file/d/1CFqoqMRa6-rV8KXUXef7SKPlMIOTYmFJ/view?usp=drive_link
+👉 https://drive.google.com/drive/folders/1TdVCIIskzAEpzrn1uQlRjEkD1SUI1anz?usp=sharing
 
 ---
 
