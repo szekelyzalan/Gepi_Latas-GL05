@@ -1,0 +1,16 @@
+=== Report ===
+
+Képek száma: 0
+Annotációk száma: 0
+Párosított fájlok: 0
+
+Hiányzó képek: 0
+Hiányzó annotációk: 0
+
+Összes objektum: 0
+
+=== OSZTÁLYELOSZLÁS ===
+
+=== PROPERTY STAT ===
+
+=== PROPERTY GROUPS ===
