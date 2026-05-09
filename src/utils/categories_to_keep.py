@@ -26,11 +26,3 @@ LABEL_MAP: dict[str, str] = {
     "regulatory--maximum-speed-limit-15--g1": "speed_limit",
     "regulatory--maximum-speed-limit-120--g1": "speed_limit"
 }
-
-CLASS_COUNTS : dict[str, int]= {
-    "speed_limit": 216,
-    "pedestrian_crossing": 177,
-    "yield": 142,
-    "no_entry": 72,
-    "stop": 55
-}
