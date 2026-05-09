@@ -20,6 +20,13 @@ yolo_dataset/
 unimportant_logs/
 literature/
 models/
+clean_signs/
+GTSRB/
+dataset_raw/
+dataset_modified/
+dataset_augmented/
+failed_signs/
+
 
 # Logs
 *.log
@@ -27,5 +34,3 @@ models/
 # OS files
 .DS_Store
 Thumbs.db
-
-out.txt
