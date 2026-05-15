@@ -1,117 +1,246 @@
-import os
-import matplotlib.pyplot as plt
 from ultralytics import YOLO
+import os
+import glob
+import json
 
-def evaluate_and_compare_models(models_dict, dataset_yaml):
-    """
-    Evaluates multiple YOLO models on the test dataset, extracts mAP and inference speed,
-    and generates comparison bar charts.
-    
-    Args:
-        models_dict (dict): A dictionary where keys are model names and values are paths to .pt files.
-        dataset_yaml (str): Path to the dataset.yaml file.
-    """
-    
-    # Dictionaries to store the extracted metrics for each model
-    map_scores = {}
-    inference_speeds = {}
+# =========================
+# PATHS
+# =========================
 
-    # Iterate through the provided models
-    for model_name, model_path in models_dict.items():
-        print(f"\n{'='*50}")
-        print(f"🚀 Starting evaluation for: {model_name}")
-        print(f"{'='*50}")
+MODEL_PATH = "best.pt"
 
-        # Check if the weight file actually exists to prevent crashes
-        if not os.path.exists(model_path):
-            print(f"⚠️ WARNING: The file '{model_path}' was not found. Skipping {model_name}.")
-            continue
+# képek mappája
+IMAGE_DIR = "train"
 
-        # Load the trained model weights
-        model = YOLO(model_path)
+# json annotációk mappája
+LABEL_DIR = "train/annotations"
 
-        # Run validation on the test split
-        # split="test" ensures we are evaluating on unseen data
-        metrics = model.val(data=dataset_yaml, split="test")
+# confidence threshold
+CONF_THRESHOLD = 0.25
 
-        # Extract mAP (mean Average Precision @ IoU 0.5:0.95)
-        # This is the primary metric for object detection accuracy
-        current_map = metrics.box.map
-        map_scores[model_name] = current_map
-        
-        # Extract inference speed (milliseconds per image)
-        # This is crucial for your future "Live test" in the car
-        current_speed = metrics.speed['inference']
-        inference_speeds[model_name] = current_speed
 
-        print(f"✅ {model_name} evaluated. mAP: {current_map:.4f}, Speed: {current_speed:.2f} ms/img")
+# =========================
+# LOAD MODEL
+# =========================
 
-    # If no models were successfully evaluated, exit the function
-    if not map_scores:
-        print("❌ No models were evaluated. Please check your file paths.")
-        return
+print("Modell betöltése...")
 
-    # ==========================================
-    # PLOTTING THE RESULTS
-    # ==========================================
-    
-    model_names = list(map_scores.keys())
-    map_values = list(map_scores.values())
-    speed_values = list(inference_speeds.values())
+model = YOLO(MODEL_PATH)
 
-    # Create a figure with 2 subplots (1 row, 2 columns)
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+print("Modell betöltve!\n")
 
-    # --- Plot 1: mAP Comparison (Accuracy) ---
-    # Higher is better
-    bars1 = ax1.bar(model_names, map_values, color='#4C72B0', edgecolor='black')
-    ax1.set_title('Model Accuracy Comparison (mAP 50-95)', fontsize=14, fontweight='bold')
-    ax1.set_ylabel('mAP Score (0.0 to 1.0)', fontsize=12)
-    ax1.set_ylim(0, 1.0)
-    ax1.grid(axis='y', linestyle='--', alpha=0.7)
 
-    # Add text labels on top of the bars for exact values
-    for bar in bars1:
-        yval = bar.get_height()
-        ax1.text(bar.get_x() + bar.get_width()/2, yval + 0.02, f"{yval:.3f}", ha='center', va='bottom', fontweight='bold')
+# =========================
+# MAP YOLO CLASS -> MAIN CLASS
+# =========================
 
-    # --- Plot 2: Inference Speed Comparison ---
-    # Lower is better (faster)
-    bars2 = ax2.bar(model_names, speed_values, color='#DD8452', edgecolor='black')
-    ax2.set_title('Inference Speed Comparison', fontsize=14, fontweight='bold')
-    ax2.set_ylabel('Milliseconds (ms) / Image', fontsize=12)
-    ax2.grid(axis='y', linestyle='--', alpha=0.7)
+def map_prediction_to_main_class(pred_name):
 
-    # Add text labels on top of the bars
-    for bar in bars2:
-        yval = bar.get_height()
-        ax2.text(bar.get_x() + bar.get_width()/2, yval + 0.5, f"{yval:.1f} ms", ha='center', va='bottom', fontweight='bold')
+    pred_name = pred_name.lower()
 
-    # Adjust layout and display the charts
-    plt.tight_layout()
-    
-    # Save the figure to the project folder
-    plt.savefig('model_comparison_results.png', dpi=300)
-    print("\n📊 Charts generated and saved as 'model_comparison_results.png'.")
-    
-    # Show the interactive plot window
-    plt.show()
+    if "warning" in pred_name:
+        return "Warning"
 
-# ==========================================
-# EXECUTION BLOCK
-# ==========================================
-if __name__ == "__main__":
-    
-    # Add your trained models here. 
-    # You can add as many as you want, the charts will adjust automatically.
-    my_models = {
-        "YOLOv8 Base (30 Epochs)": "/Users/gergo/Egyetem/MSC/1. félév/Gépi látás/best.pt",
-        #"YOLOv8 Augmented": "runs/detect/train2/weights/best.pt",
-        # "YOLOv8 Nano": "runs/detect/train3/weights/best.pt"  <-- Uncomment to add a 3rd model
-    }
+    elif "regulatory" in pred_name:
 
-    # Path to your dataset configuration file
-    dataset_file = "yolo_dataset/data.yaml"  # Update this if your yaml is in a different folder!
+        if "blue" in pred_name:
+            return "regulatory-blue"
 
-    # Run the evaluation pipeline
-    evaluate_and_compare_models(my_models, dataset_file)
+        else:
+            return "regulatory-red"
+
+    elif "complementary" in pred_name:
+        return "complementary"
+
+    elif "priority" in pred_name:
+        return "priority road"
+
+    else:
+        return "other-sign"
+
+
+# =========================
+# STATISTICS
+# =========================
+
+total_images = 0
+
+correct = 0
+wrong = 0
+not_detected = 0
+missing_annotation = 0
+
+
+# =========================
+# IMAGE LIST
+# =========================
+
+image_paths = []
+
+image_paths += glob.glob(os.path.join(IMAGE_DIR, "*.jpg"))
+image_paths += glob.glob(os.path.join(IMAGE_DIR, "*.png"))
+image_paths += glob.glob(os.path.join(IMAGE_DIR, "*.jpeg"))
+
+print(f"Talált képek száma: {len(image_paths)}\n")
+
+
+# =========================
+# PROCESS IMAGES
+# =========================
+
+for image_path in image_paths:
+
+    total_images += 1
+
+    image_name = os.path.basename(image_path)
+    image_stem = os.path.splitext(image_name)[0]
+
+    # JSON annotáció path
+    label_path = os.path.join(
+        LABEL_DIR,
+        image_stem + ".json"
+    )
+
+    # =========================
+    # CHECK ANNOTATION
+    # =========================
+
+    if not os.path.exists(label_path):
+
+        missing_annotation += 1
+
+        print(f"[NINCS ANNOTÁCIÓ] {image_name}")
+
+        continue
+
+    # =========================
+    # LOAD GROUND TRUTH
+    # =========================
+
+    gt_classes = []
+
+    try:
+
+        with open(label_path, "r") as f:
+
+            data = json.load(f)
+
+            for obj in data["objects"]:
+
+                class_name = obj["label"]
+
+                gt_classes.append(class_name)
+
+    except Exception as e:
+
+        print(f"[JSON HIBA] {image_name}: {e}")
+
+        continue
+
+    # duplikációk törlése
+    gt_classes = list(set(gt_classes))
+
+    # =========================
+    # MODEL PREDICTION
+    # =========================
+
+    try:
+
+        results = model.predict(
+            image_path,
+            conf=CONF_THRESHOLD,
+            verbose=False
+        )
+
+    except Exception as e:
+
+        print(f"[PREDIKCIÓS HIBA] {image_name}: {e}")
+
+        continue
+
+    predicted_classes = []
+
+    for result in results:
+
+        boxes = result.boxes
+
+        for box in boxes:
+
+            cls_id = int(box.cls[0])
+
+            # YOLO class name
+            class_name = model.names[cls_id]
+
+            # convert detailed class -> main category
+            mapped_class = map_prediction_to_main_class(class_name)
+
+            predicted_classes.append(mapped_class)
+
+    # duplikációk törlése
+    predicted_classes = list(set(predicted_classes))
+
+    # =========================
+    # EVALUATION
+    # =========================
+
+    if len(predicted_classes) == 0:
+
+        not_detected += 1
+
+        print(f"[NEM FELISMERTE] {image_name}")
+
+        continue
+
+    # intersection
+    matches = set(predicted_classes) & set(gt_classes)
+
+    if len(matches) > 0:
+
+        correct += 1
+
+        print(f"[HELYES] {image_name}")
+
+    else:
+
+        wrong += 1
+
+        print(f"[HIBÁS] {image_name}")
+
+        print(f"  Ground truth: {gt_classes}")
+        print(f"  Prediction:   {predicted_classes}")
+
+    # =========================
+    # DEBUG OUTPUT
+    # =========================
+
+    print(f"  GT:   {gt_classes}")
+    print(f"  Pred: {predicted_classes}")
+    print()
+
+
+# =========================
+# FINAL RESULTS
+# =========================
+
+print("\n=========================")
+print("KIÉRTÉKELÉS")
+print("=========================\n")
+
+print(f"Összes kép:           {total_images}")
+print(f"Helyes:               {correct}")
+print(f"Hibás:                {wrong}")
+print(f"Nem felismerte:       {not_detected}")
+print(f"Hiányzó annotáció:    {missing_annotation}")
+
+# accuracy
+valid_images = total_images - missing_annotation
+
+if valid_images > 0:
+
+    accuracy = (correct / valid_images) * 100
+
+    print(f"\nAccuracy: {accuracy:.2f}%")
+
+else:
+
+    print("\nNincs kiértékelhető kép.")
