@@ -47,10 +47,10 @@ visualized_GTSDB/
 visualized_mod/
 
 
-.zip
-.png
-.txt
-.pt
+*.zip
+*.png
+*.txt
+*.pt
 
 
 # Logs
