@@ -2,26 +2,41 @@ from ultralytics import YOLO
 import os
 import glob
 import json
+from collections import defaultdict
 
-# =========================
+# =========================================================
 # PATHS
-# =========================
+# =========================================================
 
-MODEL_PATH = "best.pt"
+MODEL_PATH = os.path.join("models", "best.pt")
 
-# képek mappája
-IMAGE_DIR = "train"
+IMAGE_DIR = os.path.join("test_2")
 
-# json annotációk mappája
-LABEL_DIR = "train/annotations"
+LABEL_DIR = os.path.join(IMAGE_DIR, "annotations")
 
-# confidence threshold
-CONF_THRESHOLD = 0.25
+# =========================================================
+# SETTINGS
+# =========================================================
 
+CONF_THRESHOLD = 0.35
 
-# =========================
+IOU_THRESHOLD = 0.5
+
+VALID_CLASSES = {
+    "stop",
+    "no_entry",
+    "pedestrian_crossing",
+    "yield",
+    "speed_limit"
+}
+
+# =========================================================
 # LOAD MODEL
-# =========================
+# =========================================================
+
+print("===================================")
+print("YOLO KIÉRTÉKELÉS")
+print("===================================\n")
 
 print("Modell betöltése...")
 
@@ -29,51 +44,74 @@ model = YOLO(MODEL_PATH)
 
 print("Modell betöltve!\n")
 
+# =========================================================
+# IOU CALCULATION
+# =========================================================
 
-# =========================
-# MAP YOLO CLASS -> MAIN CLASS
-# =========================
+def calculate_iou(boxA, boxB):
 
-def map_prediction_to_main_class(pred_name):
+    xA = max(boxA[0], boxB[0])
+    yA = max(boxA[1], boxB[1])
 
-    pred_name = pred_name.lower()
+    xB = min(boxA[2], boxB[2])
+    yB = min(boxA[3], boxB[3])
 
-    if "warning" in pred_name:
-        return "Warning"
+    inter_width = max(0, xB - xA)
+    inter_height = max(0, yB - yA)
 
-    elif "regulatory" in pred_name:
+    inter_area = inter_width * inter_height
 
-        if "blue" in pred_name:
-            return "regulatory-blue"
+    if inter_area == 0:
+        return 0.0
 
-        else:
-            return "regulatory-red"
+    boxA_area = (
+        (boxA[2] - boxA[0]) *
+        (boxA[3] - boxA[1])
+    )
 
-    elif "complementary" in pred_name:
-        return "complementary"
+    boxB_area = (
+        (boxB[2] - boxB[0]) *
+        (boxB[3] - boxB[1])
+    )
 
-    elif "priority" in pred_name:
-        return "priority road"
+    union_area = (
+        boxA_area +
+        boxB_area -
+        inter_area
+    )
 
-    else:
-        return "other-sign"
+    return inter_area / union_area
 
-
-# =========================
+# =========================================================
 # STATISTICS
-# =========================
+# =========================================================
 
 total_images = 0
 
-correct = 0
-wrong = 0
-not_detected = 0
-missing_annotation = 0
+total_gt_objects = 0
 
+TP = 0
+FP = 0
+FN = 0
 
-# =========================
+perfect_images = 0
+partial_images = 0
+failed_images = 0
+
+missing_annotations = 0
+
+empty_images = 0
+empty_images_with_fp = 0
+
+class_stats = defaultdict(lambda: {
+    "TP": 0,
+    "FP": 0,
+    "FN": 0
+})
+
+# =========================================================
 # IMAGE LIST
-# =========================
+# =========================================================
 
 image_paths = []
 
@@ -83,41 +121,44 @@ image_paths += glob.glob(os.path.join(IMAGE_DIR, "*.jpeg"))
 
 print(f"Talált képek száma: {len(image_paths)}\n")
 
-
-# =========================
+# =========================================================
 # PROCESS IMAGES
-# =========================
+# =========================================================
 
-for image_path in image_paths:
+for idx, image_path in enumerate(image_paths):
 
     total_images += 1
 
+    # progress indicator
+    if (idx + 1) % 100 == 0:
+
+        print(
+            f"Feldolgozva: "
+            f"{idx + 1}/{len(image_paths)}"
+        )
+
     image_name = os.path.basename(image_path)
+
     image_stem = os.path.splitext(image_name)[0]
 
-    # JSON annotáció path
+    # =====================================================
+    # ANNOTATION FILE
+    # =====================================================
+
     label_path = os.path.join(
         LABEL_DIR,
         image_stem + ".json"
     )
 
-    # =========================
-    # CHECK ANNOTATION
-    # =========================
-
     if not os.path.exists(label_path):
 
-        missing_annotation += 1
-
-        print(f"[NINCS ANNOTÁCIÓ] {image_name}")
+        missing_annotations += 1
 
         continue
 
-    # =========================
+    # =====================================================
     # LOAD GROUND TRUTH
-    # =========================
-
-    gt_classes = []
+    # =====================================================
 
     try:
 
@@ -125,24 +166,43 @@ for image_path in image_paths:
 
             data = json.load(f)
 
-            for obj in data["objects"]:
-
-                class_name = obj["label"]
-
-                gt_classes.append(class_name)
-
-    except Exception as e:
-
-        print(f"[JSON HIBA] {image_name}: {e}")
+    except Exception:
 
         continue
 
-    # duplikációk törlése
-    gt_classes = list(set(gt_classes))
+    gt_objects = []
 
-    # =========================
+    for obj in data["objects"]:
+
+        label = obj["label"]
+
+        if label not in VALID_CLASSES:
+            continue
+
+        bbox = obj["bbox"]
+
+        gt_box = [
+            float(bbox["xmin"]),
+            float(bbox["ymin"]),
+            float(bbox["xmax"]),
+            float(bbox["ymax"])
+        ]
+
+        gt_objects.append({
+            "label": label,
+            "bbox": gt_box,
+            "matched": False
+        })
+
+    total_gt_objects += len(gt_objects)
+
+    if len(gt_objects) == 0:
+
+        empty_images += 1
+
+    # =====================================================
     # MODEL PREDICTION
-    # =========================
+    # =====================================================
 
     try:
 
@@ -152,13 +212,11 @@ for image_path in image_paths:
             verbose=False
         )
 
-    except Exception as e:
-
-        print(f"[PREDIKCIÓS HIBA] {image_name}: {e}")
+    except Exception:
 
         continue
 
-    predicted_classes = []
+    pred_objects = []
 
     for result in results:
 
@@ -168,79 +226,239 @@ for image_path in image_paths:
 
             cls_id = int(box.cls[0])
 
-            # YOLO class name
             class_name = model.names[cls_id]
 
-            # convert detailed class -> main category
-            mapped_class = map_prediction_to_main_class(class_name)
+            if class_name not in VALID_CLASSES:
+                continue
 
-            predicted_classes.append(mapped_class)
+            xyxy = box.xyxy[0].cpu().numpy()
 
-    # duplikációk törlése
-    predicted_classes = list(set(predicted_classes))
+            pred_box = [
+                float(xyxy[0]),
+                float(xyxy[1]),
+                float(xyxy[2]),
+                float(xyxy[3])
+            ]
 
-    # =========================
-    # EVALUATION
-    # =========================
+            pred_objects.append({
+                "label": class_name,
+                "bbox": pred_box,
+                "matched": False
+            })
 
-    if len(predicted_classes) == 0:
+    # =====================================================
+    # MATCHING
+    # =====================================================
 
-        not_detected += 1
+    image_tp = 0
+    image_fp = 0
+    image_fn = 0
 
-        print(f"[NEM FELISMERTE] {image_name}")
+    # GT -> prediction matching
+    for gt in gt_objects:
 
-        continue
+        best_iou = 0.0
+        best_pred = None
 
-    # intersection
-    matches = set(predicted_classes) & set(gt_classes)
+        for pred in pred_objects:
 
-    if len(matches) > 0:
+            if pred["matched"]:
+                continue
 
-        correct += 1
+            if pred["label"] != gt["label"]:
+                continue
 
-        print(f"[HELYES] {image_name}")
+            iou = calculate_iou(
+                gt["bbox"],
+                pred["bbox"]
+            )
+
+            if iou > best_iou:
+
+                best_iou = iou
+                best_pred = pred
+
+        if best_iou >= IOU_THRESHOLD:
+
+            TP += 1
+            image_tp += 1
+
+            gt["matched"] = True
+            best_pred["matched"] = True
+
+            class_stats[gt["label"]]["TP"] += 1
+
+        else:
+
+            FN += 1
+            image_fn += 1
+
+            class_stats[gt["label"]]["FN"] += 1
+
+    # unmatched predictions = FP
+    for pred in pred_objects:
+
+        if not pred["matched"]:
+
+            FP += 1
+            image_fp += 1
+
+            class_stats[pred["label"]]["FP"] += 1
+
+    # =====================================================
+    # IMAGE LEVEL RESULT
+    # =====================================================
+
+    if len(gt_objects) == 0 and image_fp > 0:
+
+        empty_images_with_fp += 1
+
+    if image_fn == 0 and image_fp == 0:
+
+        perfect_images += 1
+
+    elif image_tp > 0:
+
+        partial_images += 1
 
     else:
 
-        wrong += 1
+        failed_images += 1
 
-        print(f"[HIBÁS] {image_name}")
+# =========================================================
+# FINAL METRICS
+# =========================================================
 
-        print(f"  Ground truth: {gt_classes}")
-        print(f"  Prediction:   {predicted_classes}")
+print("\n===================================")
+print("VÉGSŐ KIÉRTÉKELÉS")
+print("===================================\n")
 
-    # =========================
-    # DEBUG OUTPUT
-    # =========================
+precision = (
+    TP / (TP + FP)
+    if (TP + FP) > 0
+    else 0
+)
 
-    print(f"  GT:   {gt_classes}")
-    print(f"  Pred: {predicted_classes}")
+recall = (
+    TP / (TP + FN)
+    if (TP + FN) > 0
+    else 0
+)
+
+f1 = (
+    2 * precision * recall /
+    (precision + recall)
+    if (precision + recall) > 0
+    else 0
+)
+
+fp_per_image = FP / total_images
+
+empty_fp_rate = (
+    empty_images_with_fp / empty_images
+    if empty_images > 0
+    else 0
+)
+
+print(f"Összes kép:                  {total_images}")
+
+print(f"Hiányzó annotáció:           {missing_annotations}")
+
+print()
+
+print(f"Üres képek (nincs GT):       {empty_images}")
+
+print(
+    f"Üres képek FP-vel:           "
+    f"{empty_images_with_fp}"
+)
+
+print(
+    f"Empty-image FP rate:         "
+    f"{empty_fp_rate:.4f}"
+)
+
+print()
+
+print(f"Összes GT tábla:             {total_gt_objects}")
+
+print()
+
+print(f"TP (jó detektálás):          {TP}")
+
+print(f"FP (fals pozitív):           {FP}")
+
+print(f"FN (kihagyott tábla):        {FN}")
+
+print()
+
+print(f"Precision:                   {precision:.4f}")
+
+print(f"Recall:                      {recall:.4f}")
+
+print(f"F1-score:                    {f1:.4f}")
+
+print()
+
+print(f"FP / image:                  {fp_per_image:.4f}")
+
+print()
+
+print(f"Tökéletes képek:             {perfect_images}")
+
+print(f"Részben jó képek:            {partial_images}")
+
+print(f"Hibás képek:                 {failed_images}")
+
+# =========================================================
+# PER-CLASS STATS
+# =========================================================
+
+print("\n===================================")
+print("OSZTÁLYONKÉNTI STATISZTIKA")
+print("===================================\n")
+
+for cls_name, stats in class_stats.items():
+
+    cls_tp = stats["TP"]
+    cls_fp = stats["FP"]
+    cls_fn = stats["FN"]
+
+    cls_precision = (
+        cls_tp / (cls_tp + cls_fp)
+        if (cls_tp + cls_fp) > 0
+        else 0
+    )
+
+    cls_recall = (
+        cls_tp / (cls_tp + cls_fn)
+        if (cls_tp + cls_fn) > 0
+        else 0
+    )
+
+    cls_f1 = (
+        2 * cls_precision * cls_recall /
+        (cls_precision + cls_recall)
+        if (cls_precision + cls_recall) > 0
+        else 0
+    )
+
+    print(f"Class: {cls_name}")
+
+    print(f"  TP: {cls_tp}")
+
+    print(f"  FP: {cls_fp}")
+
+    print(f"  FN: {cls_fn}")
+
+    print(f"  Precision: {cls_precision:.4f}")
+
+    print(f"  Recall:    {cls_recall:.4f}")
+
+    print(f"  F1-score:  {cls_f1:.4f}")
+
     print()
 
-
-# =========================
-# FINAL RESULTS
-# =========================
-
-print("\n=========================")
-print("KIÉRTÉKELÉS")
-print("=========================\n")
-
-print(f"Összes kép:           {total_images}")
-print(f"Helyes:               {correct}")
-print(f"Hibás:                {wrong}")
-print(f"Nem felismerte:       {not_detected}")
-print(f"Hiányzó annotáció:    {missing_annotation}")
-
-# accuracy
-valid_images = total_images - missing_annotation
-
-if valid_images > 0:
-
-    accuracy = (correct / valid_images) * 100
-
-    print(f"\nAccuracy: {accuracy:.2f}%")
-
-else:
-
-    print("\nNincs kiértékelhető kép.")
+print("===================================")
+print("KIÉRTÉKELÉS KÉSZ")
+print("===================================")
