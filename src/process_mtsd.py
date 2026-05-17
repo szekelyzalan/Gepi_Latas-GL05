@@ -2,6 +2,8 @@ import os
 import glob
 import shutil
 from pathlib import Path
+from utils.categories_to_keep import LABEL_MAP
+import json
 
 # =========================================================
 # SETTINGS
@@ -29,7 +31,7 @@ OUTPUT_DIR = Path("test_MTSD")
 OUTPUT_ANNOTATION_DIR = OUTPUT_DIR / "annotations"
 
 # maximum number of images
-MAX_IMAGES = 5000
+MAX_IMAGES = 2000
 
 # =========================================================
 # CREATE OUTPUT FOLDERS
@@ -38,6 +40,14 @@ MAX_IMAGES = 5000
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 OUTPUT_ANNOTATION_DIR.mkdir(exist_ok=True)
+
+CLASS_PRIORITY = {
+    "stop": 10,
+    "no_entry": 8,
+    "pedestrian_crossing": 7,
+    "yield": 5,
+    "speed_limit": 3
+}
 
 # =========================================================
 # GET USED IMAGE NAMES
@@ -85,7 +95,7 @@ print(f"Talált MTSD képek: {len(mtsd_image_paths)}\n")
 # PROCESS
 # =========================================================
 
-copied_count = 0
+candidate_images = []
 
 missing_annotation = 0
 
@@ -98,9 +108,6 @@ print("MÁSOLÁS INDUL")
 print("===================================\n")
 
 for image_path in mtsd_image_paths:
-
-    if copied_count >= MAX_IMAGES:
-        break
 
     image_name = os.path.basename(image_path)
 
@@ -132,6 +139,78 @@ for image_path in mtsd_image_paths:
         continue
 
     # =====================================================
+    # LOAD ANNOTATION
+    # =====================================================
+
+    with open(annotation_path, "r") as f:
+
+        data = json.load(f)
+
+    score = 0
+
+    relevant_count = 0
+
+    for obj in data.get("objects", []):
+
+        label = obj.get("label")
+
+        if label not in LABEL_MAP:
+            continue
+
+        mapped = LABEL_MAP[label]
+
+        score += CLASS_PRIORITY[mapped]
+
+        relevant_count += 1
+
+    # multi-object bonus
+    score += relevant_count * 2
+
+    # ignore completely irrelevant images
+    if relevant_count == 0:
+        continue
+
+    candidate_images.append({
+        "image_path": image_path,
+        "annotation_path": annotation_path,
+        "score": score,
+        "relevant_count": relevant_count
+    })
+
+print(f"Candidate images: {len(candidate_images)}")
+
+# =========================================================
+# SORT BY SCORE
+# =========================================================
+
+candidate_images.sort(
+    key=lambda x: (
+        x["score"],
+        x["relevant_count"]
+    ),
+    reverse=True
+)
+
+# =========================================================
+# COPY BEST IMAGES
+# =========================================================
+
+copied_count = 0
+
+for item in candidate_images:
+
+    if copied_count >= MAX_IMAGES:
+        break
+
+    image_path = item["image_path"]
+
+    annotation_path = item["annotation_path"]
+
+    image_name = os.path.basename(image_path)
+
+    image_stem = Path(image_name).stem
+
+    # =====================================================
     # COPY IMAGE
     # =====================================================
 
@@ -158,7 +237,6 @@ for image_path in mtsd_image_paths:
 
     copied_count += 1
 
-    # progress
     if copied_count % 100 == 0:
 
         print(f"Másolva: {copied_count}")
