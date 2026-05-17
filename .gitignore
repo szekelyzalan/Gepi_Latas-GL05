@@ -26,6 +26,31 @@ dataset_raw/
 dataset_modified/
 dataset_augmented/
 failed_signs/
+augmented_train/
+dataset_converted/
+dataset_gtsdb_converted/
+dataset_gtsdb_raw/
+dataset_merged/
+gtsdb_extracted/
+gtsdb_train/
+MTSD_annotations/
+MTSD_images/
+out/
+predictions/
+process_GTSRB/
+test/
+test_2/
+test_MTSD/
+unagmented_train/
+augmented_train/
+visualized_GTSDB/
+visualized_mod/
+
+
+.zip
+.png
+.txt
+.pt
 
 
 # Logs
